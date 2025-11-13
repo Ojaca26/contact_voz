@@ -305,5 +305,4 @@ def main():
     # Mostrar últimos contactos
     mostrar_ultimos_contactos()
 
-if __name__ == "__main__":
-    m
+if __name__ == "__main__"
