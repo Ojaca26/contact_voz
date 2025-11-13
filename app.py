@@ -25,6 +25,7 @@ def configurar_gemini():
         st.error("⚠️ No se encontró GEMINI_API_KEY en secrets")
         st.stop()
     genai.configure(api_key=api_key)
+    # Usar el modelo actualizado de Gemini
     return genai.GenerativeModel('gemini-2.5-flash')
 
 # Conectar a la base de datos
@@ -198,6 +199,12 @@ def main():
     # Configurar Gemini
     modelo = configurar_gemini()
     
+    # Inicializar session state para guardar datos extraídos
+    if 'datos_extraidos' not in st.session_state:
+        st.session_state.datos_extraidos = None
+    if 'mensaje_procesado' not in st.session_state:
+        st.session_state.mensaje_procesado = False
+    
     # Crear dos columnas
     col1, col2 = st.columns([2, 1])
     
@@ -213,35 +220,59 @@ def main():
         )
         
         # Botón para procesar
-        if st.button("🚀 Procesar y Registrar", type="primary", use_container_width=True):
+        if st.button("🚀 Procesar y Extraer Datos", type="primary", use_container_width=True):
             if mensaje.strip():
                 with st.spinner("🤖 Analizando mensaje con IA..."):
                     # Extraer datos
                     datos = extraer_datos_contacto(mensaje, modelo)
                     
                     if datos:
-                        # Mostrar datos extraídos
-                        st.success("✅ Datos extraídos correctamente")
-                        
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            st.write("**📱 WhatsApp:**", datos.get('whatsapp') or '❌ No detectado')
-                            st.write("**👤 Nombre:**", datos.get('nombre') or '❌ No detectado')
-                        with col_b:
-                            st.write("**🏢 Empresa:**", datos.get('empresa') or '❌ No detectado')
-                            st.write("**📝 Observación:**", datos.get('observacion') or '❌ No detectado')
-                        
-                        # Guardar en base de datos
-                        if st.button("💾 Confirmar y Guardar", type="secondary"):
-                            if guardar_contacto(datos):
-                                st.success("🎉 ¡Contacto guardado exitosamente!")
-                                st.balloons()
-                                # Limpiar el área de texto
-                                st.rerun()
-                            else:
-                                st.error("No se pudo guardar el contacto")
+                        st.session_state.datos_extraidos = datos
+                        st.session_state.mensaje_procesado = True
+                        st.rerun()
             else:
                 st.warning("⚠️ Por favor, ingresa un mensaje")
+        
+        # Mostrar datos extraídos si existen
+        if st.session_state.mensaje_procesado and st.session_state.datos_extraidos:
+            st.success("✅ Datos extraídos correctamente")
+            
+            datos = st.session_state.datos_extraidos
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.write("**📱 WhatsApp:**", datos.get('whatsapp') or '❌ No detectado')
+                st.write("**👤 Nombre:**", datos.get('nombre') or '❌ No detectado')
+            with col_b:
+                st.write("**🏢 Empresa:**", datos.get('empresa') or '❌ No detectado')
+                st.write("**📝 Observación:**", datos.get('observacion') or '❌ No detectado')
+            
+            st.markdown("---")
+            
+            # Botones para guardar o cancelar
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("💾 Guardar en Base de Datos", type="primary", use_container_width=True):
+                    with st.spinner("Guardando..."):
+                        if guardar_contacto(datos):
+                            st.success("🎉 ¡Contacto guardado exitosamente!")
+                            st.balloons()
+                            # Limpiar session state
+                            st.session_state.datos_extraidos = None
+                            st.session_state.mensaje_procesado = False
+                            # Esperar un poco antes de recargar
+                            import time
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo guardar el contacto. Revisa la conexión a la BD.")
+            
+            with col_btn2:
+                if st.button("🔄 Nuevo Registro", type="secondary", use_container_width=True):
+                    # Limpiar session state
+                    st.session_state.datos_extraidos = None
+                    st.session_state.mensaje_procesado = False
+                    st.rerun()
     
     with col2:
         st.subheader("ℹ️ Ayuda")
