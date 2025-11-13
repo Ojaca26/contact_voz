@@ -26,7 +26,7 @@ def configurar_gemini():
         st.stop()
     genai.configure(api_key=api_key)
     # Usar el modelo actualizado de Gemini
-    return genai.GenerativeModel('gemini-1.5-flash')
+    return genai.GenerativeModel('gemini-2.5-flash')
 
 # Conectar a la base de datos
 def conectar_db():
