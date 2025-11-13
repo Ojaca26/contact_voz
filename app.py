@@ -39,7 +39,10 @@ def conectar_db():
             database=st.secrets.get("DB_NAME", "lbusiness"),
             port=st.secrets.get("DB_PORT", 3306),
             charset='utf8mb4',
-            collation='utf8mb4_unicode_ci'
+            collation='utf8mb4_unicode_ci',
+            # IMPORTANTE: Agregar estas opciones para manejar BIGINT correctamente
+            use_pure=True,  # Usar implementación Python pura
+            converter_class=mysql.connector.conversion.MySQLConverterBase
         )
         return conexion
     except Exception as e:
@@ -103,20 +106,39 @@ No incluyas explicaciones adicionales, solo el JSON.
         st.error(f"Error al procesar con Gemini: {e}")
         return None
 
-# Limpiar número de WhatsApp
+# FUNCIÓN CORREGIDA: Limpiar número de WhatsApp
 def limpiar_whatsapp(numero):
     """Limpia el número de WhatsApp dejando solo dígitos"""
     if not numero:
         return None
+    
     # Eliminar todo excepto dígitos
     numero_limpio = re.sub(r'[^\d]', '', numero)
-    # Convertir a entero (la columna _Whatsapp es BIGINT)
+    
+    if not numero_limpio:
+        return None
+    
+    # IMPORTANTE: Para números colombianos, asegurarse de que tengan el código de país
+    # Si el número empieza con 3 y tiene 10 dígitos, agregar el código de Colombia (57)
+    if len(numero_limpio) == 10 and numero_limpio[0] == '3':
+        numero_limpio = '57' + numero_limpio
+    
+    # Convertir a entero - Python maneja automáticamente números grandes
     try:
-        return int(numero_limpio) if numero_limpio else None
-    except:
+        numero_final = int(numero_limpio)
+        
+        # Verificar que el número sea válido (no exceda el límite de BIGINT)
+        # BIGINT en MySQL: -9223372036854775808 a 9223372036854775807
+        if numero_final > 9223372036854775807:
+            st.warning(f"⚠️ Número muy grande: {numero_final}")
+            return None
+        
+        return numero_final
+    except ValueError:
+        st.warning(f"⚠️ No se pudo convertir el número: {numero_limpio}")
         return None
 
-# Guardar en base de datos
+# FUNCIÓN MODIFICADA: Guardar en base de datos
 def guardar_contacto(datos):
     """Guarda el contacto en la base de datos"""
     conexion = conectar_db()
@@ -130,9 +152,16 @@ def guardar_contacto(datos):
         whatsapp_limpio = limpiar_whatsapp(datos.get('whatsapp'))
         
         # 🔍 DEBUG: Mostrar valor antes de guardar
-        st.write(f"🔍 DEBUG - WhatsApp a guardar: {whatsapp_limpio} (tipo: {type(whatsapp_limpio).__name__})")
+        st.write(f"🔍 DEBUG - WhatsApp original: {datos.get('whatsapp')}")
+        st.write(f"🔍 DEBUG - WhatsApp limpio: {whatsapp_limpio} (tipo: {type(whatsapp_limpio).__name__})")
         
-        # IMPORTANTE: La tabla tiene estas columnas: _Whatsapp, Nombre, Empresa, Observacion
+        if whatsapp_limpio:
+            # Verificar que el número no exceda INT de 32 bits
+            if whatsapp_limpio > 2147483647:
+                st.info(f"ℹ️ Número grande detectado: {whatsapp_limpio} (mayor a INT32)")
+        
+        # La tabla tiene estas columnas: _Whatsapp, Nombre, Empresa, Observacion
+        # IMPORTANTE: Usar %s para todos los parámetros, MySQL Connector los manejará correctamente
         query = """
         INSERT INTO contacto_por_voz (_Whatsapp, Nombre, Empresa, Observacion)
         VALUES (%s, %s, %s, %s)
@@ -151,18 +180,31 @@ def guardar_contacto(datos):
         cursor.execute(query, valores)
         conexion.commit()
         
+        # Verificar que se insertó correctamente
+        cursor.execute("SELECT LAST_INSERT_ID()")
+        last_id = cursor.fetchone()[0]
+        st.success(f"✅ Registro insertado con ID: {last_id}")
+        
         cursor.close()
         conexion.close()
         
         return True
     
+    except mysql.connector.Error as e:
+        st.error(f"❌ Error MySQL: {e}")
+        st.error(f"Código de error: {e.errno}")
+        st.error(f"Mensaje SQL: {e.msg}")
+        if conexion:
+            conexion.rollback()
+            conexion.close()
+        return False
     except Exception as e:
-        st.error(f"❌ Error al guardar en base de datos: {e}")
+        st.error(f"❌ Error general al guardar: {e}")
         if conexion:
             conexion.close()
         return False
 
-# Mostrar últimos contactos registrados
+# FUNCIÓN MODIFICADA: Mostrar últimos contactos registrados
 def mostrar_ultimos_contactos():
     """Muestra los últimos 5 contactos registrados"""
     conexion = conectar_db()
@@ -171,10 +213,11 @@ def mostrar_ultimos_contactos():
     
     try:
         cursor = conexion.cursor(dictionary=True)
-        # IMPORTANTE: La tabla tiene: _Whatsapp, Nombre, Empresa, Observacion (sin fecha_registro)
+        # Ordenar por _Whatsapp DESC para ver los más recientes (asumiendo que IDs más altos = más recientes)
         query = """
         SELECT _Whatsapp, Nombre, Empresa, Observacion
         FROM contacto_por_voz
+        ORDER BY _Whatsapp DESC
         LIMIT 5
         """
         cursor.execute(query)
@@ -183,14 +226,25 @@ def mostrar_ultimos_contactos():
         if resultados:
             st.subheader("📋 Últimos contactos registrados")
             for contacto in resultados:
+                # Formatear el número de WhatsApp para mostrar
+                whatsapp_display = str(contacto['_Whatsapp']) if contacto['_Whatsapp'] else 'N/A'
+                
+                # Si es un número colombiano con código, formatear mejor
+                if whatsapp_display.startswith('57') and len(whatsapp_display) == 12:
+                    whatsapp_display = f"+57 {whatsapp_display[2:5]} {whatsapp_display[5:8]} {whatsapp_display[8:]}"
+                elif len(whatsapp_display) == 10:
+                    whatsapp_display = f"{whatsapp_display[:3]} {whatsapp_display[3:6]} {whatsapp_display[6:]}"
+                
                 with st.expander(f"🔹 {contacto['Nombre'] or 'Sin nombre'} - {contacto['Empresa'] or 'Sin empresa'}"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.write(f"**WhatsApp:** {contacto['_Whatsapp'] or 'N/A'}")
+                        st.write(f"**WhatsApp:** {whatsapp_display}")
                         st.write(f"**Nombre:** {contacto['Nombre'] or 'N/A'}")
                     with col2:
                         st.write(f"**Empresa:** {contacto['Empresa'] or 'N/A'}")
                     st.write(f"**Observación:** {contacto['Observacion'] or 'Sin observaciones'}")
+        else:
+            st.info("No hay contactos registrados aún")
         
         cursor.close()
         conexion.close()
@@ -245,9 +299,14 @@ def main():
             
             datos = st.session_state.datos_extraidos
             
+            # Mostrar el número procesado
+            whatsapp_procesado = limpiar_whatsapp(datos.get('whatsapp'))
+            
             col_a, col_b = st.columns(2)
             with col_a:
                 st.write("**📱 WhatsApp:**", datos.get('whatsapp') or '❌ No detectado')
+                if whatsapp_procesado:
+                    st.caption(f"Número procesado: {whatsapp_procesado}")
                 st.write("**👤 Nombre:**", datos.get('nombre') or '❌ No detectado')
             with col_b:
                 st.write("**🏢 Empresa:**", datos.get('empresa') or '❌ No detectado')
@@ -271,7 +330,7 @@ def main():
                             time.sleep(1)
                             st.rerun()
                         else:
-                            st.error("❌ No se pudo guardar el contacto. Revisa la conexión a la BD.")
+                            st.error("❌ No se pudo guardar el contacto. Revisa los logs arriba.")
             
             with col_btn2:
                 if st.button("🔄 Nuevo Registro", type="secondary", use_container_width=True):
@@ -297,6 +356,13 @@ def main():
         - No estén en orden
         - Falte algún campo
         - Use lenguaje natural
+        
+        ---
+        
+        **📊 Info técnica:**
+        - Los números se guardan con código de país
+        - Formato BIGINT soporta números grandes
+        - Máximo: 9,223,372,036,854,775,807
         """)
     
     # Separador
@@ -305,4 +371,18 @@ def main():
     # Mostrar últimos contactos
     mostrar_ultimos_contactos()
 
-if __name__ == "__main__"
+    # Footer con información de depuración
+    with st.expander("🔧 Información de depuración"):
+        st.write("**Límites numéricos:**")
+        st.write(f"- INT32 máximo: 2,147,483,647")
+        st.write(f"- BIGINT máximo: 9,223,372,036,854,775,807")
+        st.write(f"- Número colombiano típico: 573001234567 (con código)")
+        
+        # Probar conversión
+        test_num = "3001234567"
+        st.write(f"\n**Prueba de conversión:**")
+        st.write(f"- Entrada: {test_num}")
+        st.write(f"- Salida: {limpiar_whatsapp(test_num)}")
+
+if __name__ == "__main__":
+    main()
