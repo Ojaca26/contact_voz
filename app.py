@@ -107,9 +107,13 @@ def limpiar_whatsapp(numero):
     """Limpia el número de WhatsApp dejando solo dígitos"""
     if not numero:
         return None
-    # Eliminar todo excepto dígitos y el +
-    numero_limpio = re.sub(r'[^\d+]', '', numero)
-    return numero_limpio if numero_limpio else None
+    # Eliminar todo excepto dígitos
+    numero_limpio = re.sub(r'[^\d]', '', numero)
+    # Convertir a entero (la columna _Whatsapp es INT)
+    try:
+        return int(numero_limpio) if numero_limpio else None
+    except:
+        return None
 
 # Guardar en base de datos
 def guardar_contacto(datos):
@@ -121,20 +125,20 @@ def guardar_contacto(datos):
     try:
         cursor = conexion.cursor()
         
-        # Limpiar el número de WhatsApp
+        # Limpiar el número de WhatsApp (solo números, como INT)
         whatsapp_limpio = limpiar_whatsapp(datos.get('whatsapp'))
         
+        # IMPORTANTE: La tabla tiene estas columnas: _Whatsapp, Nombre, Empresa, Observacion
         query = """
-        INSERT INTO contacto_por_voz (whatsapp, nombre, empresa, observacion, fecha_registro)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO contacto_por_voz (_Whatsapp, Nombre, Empresa, Observacion)
+        VALUES (%s, %s, %s, %s)
         """
         
         valores = (
             whatsapp_limpio,
             datos.get('nombre'),
             datos.get('empresa'),
-            datos.get('observacion'),
-            datetime.now()
+            datos.get('observacion')
         )
         
         cursor.execute(query, valores)
@@ -160,10 +164,10 @@ def mostrar_ultimos_contactos():
     
     try:
         cursor = conexion.cursor(dictionary=True)
+        # IMPORTANTE: La tabla tiene: _Whatsapp, Nombre, Empresa, Observacion (sin fecha_registro)
         query = """
-        SELECT id, whatsapp, nombre, empresa, observacion, fecha_registro
+        SELECT _Whatsapp, Nombre, Empresa, Observacion
         FROM contacto_por_voz
-        ORDER BY fecha_registro DESC
         LIMIT 5
         """
         cursor.execute(query)
@@ -172,15 +176,14 @@ def mostrar_ultimos_contactos():
         if resultados:
             st.subheader("📋 Últimos contactos registrados")
             for contacto in resultados:
-                with st.expander(f"🔹 {contacto['nombre'] or 'Sin nombre'} - {contacto['empresa'] or 'Sin empresa'}"):
+                with st.expander(f"🔹 {contacto['Nombre'] or 'Sin nombre'} - {contacto['Empresa'] or 'Sin empresa'}"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.write(f"**WhatsApp:** {contacto['whatsapp'] or 'N/A'}")
-                        st.write(f"**Nombre:** {contacto['nombre'] or 'N/A'}")
+                        st.write(f"**WhatsApp:** {contacto['_Whatsapp'] or 'N/A'}")
+                        st.write(f"**Nombre:** {contacto['Nombre'] or 'N/A'}")
                     with col2:
-                        st.write(f"**Empresa:** {contacto['empresa'] or 'N/A'}")
-                        st.write(f"**Fecha:** {contacto['fecha_registro']}")
-                    st.write(f"**Observación:** {contacto['observacion'] or 'Sin observaciones'}")
+                        st.write(f"**Empresa:** {contacto['Empresa'] or 'N/A'}")
+                    st.write(f"**Observación:** {contacto['Observacion'] or 'Sin observaciones'}")
         
         cursor.close()
         conexion.close()
