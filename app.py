@@ -26,7 +26,7 @@ def configurar_gemini():
         st.stop()
     genai.configure(api_key=api_key)
     # Usar el modelo actualizado de Gemini
-    return genai.GenerativeModel('gemini-2.5-flash')
+    return genai.GenerativeModel('gemini-1.5-flash')
 
 # Conectar a la base de datos
 def conectar_db():
@@ -110,7 +110,7 @@ def limpiar_whatsapp(numero):
         return None
     # Eliminar todo excepto dígitos
     numero_limpio = re.sub(r'[^\d]', '', numero)
-    # Convertir a entero (la columna _Whatsapp es INT)
+    # Convertir a entero (la columna _Whatsapp es BIGINT)
     try:
         return int(numero_limpio) if numero_limpio else None
     except:
@@ -126,8 +126,11 @@ def guardar_contacto(datos):
     try:
         cursor = conexion.cursor()
         
-        # Limpiar el número de WhatsApp (solo números, como INT)
+        # Limpiar el número de WhatsApp (solo números, como BIGINT)
         whatsapp_limpio = limpiar_whatsapp(datos.get('whatsapp'))
+        
+        # 🔍 DEBUG: Mostrar valor antes de guardar
+        st.write(f"🔍 DEBUG - WhatsApp a guardar: {whatsapp_limpio} (tipo: {type(whatsapp_limpio).__name__})")
         
         # IMPORTANTE: La tabla tiene estas columnas: _Whatsapp, Nombre, Empresa, Observacion
         query = """
@@ -141,6 +144,9 @@ def guardar_contacto(datos):
             datos.get('empresa'),
             datos.get('observacion')
         )
+        
+        # 🔍 DEBUG: Mostrar valores completos
+        st.write(f"🔍 DEBUG - Valores completos: {valores}")
         
         cursor.execute(query, valores)
         conexion.commit()
@@ -300,4 +306,4 @@ def main():
     mostrar_ultimos_contactos()
 
 if __name__ == "__main__":
-    main()
+    m
